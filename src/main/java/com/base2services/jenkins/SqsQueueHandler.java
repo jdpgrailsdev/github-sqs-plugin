@@ -5,11 +5,7 @@ import com.amazonaws.services.sqs.model.DeleteMessageRequest;
 import com.amazonaws.services.sqs.model.Message;
 import com.amazonaws.services.sqs.model.ReceiveMessageRequest;
 import com.cloudbees.jenkins.GitHubWebHook;
-import hudson.Extension;
-import hudson.model.PeriodicWork;
-import hudson.util.SequentialExecutionQueue;
-import hudson.util.TimeUnit2;
-import jenkins.github.aws.parser.MessageParser;
+
 import org.kohsuke.github.GHEvent;
 
 import java.util.ArrayList;
@@ -17,6 +13,12 @@ import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import hudson.Extension;
+import hudson.model.PeriodicWork;
+import hudson.util.SequentialExecutionQueue;
+import hudson.util.TimeUnit2;
+import jenkins.github.aws.parser.MessageParser;
 
 /**
  * Receives a message from SQS and triggers any builds
@@ -30,7 +32,7 @@ public class SqsQueueHandler extends PeriodicWork {
 
     private transient final SequentialExecutionQueue queue = new SequentialExecutionQueue(Executors.newFixedThreadPool(2));
 
-    private MessageParser messageParser = new MessageParser();
+    private final MessageParser messageParser = new MessageParser();
 
     @Override
     public long getRecurrencePeriod() {
@@ -40,7 +42,7 @@ public class SqsQueueHandler extends PeriodicWork {
     @Override
     protected void doRun() throws Exception {
         if (queue.getInProgress().size() == 0) {
-            List<SqsProfile> profiles = SqsBuildTrigger.DescriptorImpl.get().getSqsProfiles();
+            final List<SqsProfile> profiles = SqsBuildTrigger.DescriptorImpl.get().getSqsProfiles();
             if (profiles.size() != 0) {
                 queue.setExecutors(Executors.newFixedThreadPool(profiles.size()));
                 for (final SqsProfile profile : profiles) {
@@ -58,51 +60,40 @@ public class SqsQueueHandler extends PeriodicWork {
 
     private class SQSQueueReceiver implements Runnable {
 
-        private SqsProfile profile;
+        private final SqsProfile profile;
 
-        private SQSQueueReceiver(SqsProfile profile) {
+        private SQSQueueReceiver(final SqsProfile profile) {
             this.profile = profile;
         }
 
+        @Override
         public void run() {
             LOGGER.fine("looking for build triggers on queue:" + profile.sqsQueue);
-            AmazonSQS sqs = profile.getSQSClient();
-            String queueUrl = profile.getQueueUrl();
-            ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(queueUrl);
+            final AmazonSQS sqs = profile.getSQSClient();
+            final String queueUrl = profile.getQueueUrl();
+            final ReceiveMessageRequest receiveMessageRequest = new ReceiveMessageRequest(queueUrl);
             receiveMessageRequest.setWaitTimeSeconds(20);
             List<Message> messages = new ArrayList<>();
 
             try {
                 messages = sqs.receiveMessage(receiveMessageRequest).getMessages();
-            } catch (Exception ex) {
+            } catch (final Exception ex) {
                 LOGGER.warning("Unable to retrieve messages from the queue. " + ex.getMessage());
             }
 
-            for (Message message : messages) {
+            for (final Message message : messages) {
                 //Process the message payload
                 try {
-                    String awsMessage = message.getBody();
+                    final String awsMessage = message.getBody();
                     LOGGER.fine("Received Message from AWS: " + awsMessage);
 
-                    String actualMessage = messageParser.extractActualGithubMessage(awsMessage);
+                    final String actualMessage = messageParser.extractActualGithubMessage(awsMessage);
                     LOGGER.fine("Actual Github Message: " + actualMessage);
 
+                    GitHubWebHook.get().doIndex(GHEvent.PUSH, actualMessage);
+                    LOGGER.fine("GitHub builds triggered.");
 
-                    GHEvent event  = messageParser.getGithubEvent(awsMessage);
-                    LOGGER.fine("Github event type: " + event.toString());
-
-                    switch (event) {
-                        case PUSH :
-                            GitHubWebHook.get().doIndex(GHEvent.PUSH, actualMessage);
-                            break;
-                        case PULL_REQUEST:
-                            GitHubWebHook.get().doIndex(GHEvent.PULL_REQUEST, actualMessage);
-                            break;
-                        default:
-                            LOGGER.warning("No trigger setup for this event type: " + event.toString());
-                    }
-
-                } catch (Exception ex) {
+                } catch (final Exception ex) {
                     LOGGER.log(Level.SEVERE, "unable to trigger builds " + ex.getMessage(), ex);
                 } finally {
                     //delete the message even if it failed

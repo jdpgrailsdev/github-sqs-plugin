@@ -10,7 +10,7 @@
 
     <groupId>com.base2services.jenkins</groupId>
     <artifactId>github-sqs-plugin</artifactId>
-    <version>2.2-SNAPSHOT</version>
+    <version>2.2.newrelic-SNAPSHOT</version>
     <packaging>hpi</packaging>
 
     <name>GitHub SQS Build Trigger Plugin</name>
